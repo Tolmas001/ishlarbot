@@ -1,4 +1,5 @@
 import type { Context, Telegram } from "telegraf";
+import { Markup } from "telegraf";
 import { addJob } from "../../services/job.service.js";
 import type { JobSession, NewJob, User } from "../../types.js";
 import { requireText } from "../../utils/validation.js";
@@ -10,7 +11,9 @@ import {
   employerMenu,
   skipLocationKeyboard,
   skipPhotoKeyboard,
-  skipWorkTimeKeyboard
+  skipWorkTimeKeyboard,
+  jobTypeKeyboard,
+  experienceLevelKeyboard
 } from "../keyboards.js";
 import { clearSession, setSession } from "../sessionStore.js";
 
@@ -45,6 +48,38 @@ export async function handleJobFlow(ctx: Context, session: JobSession, telegram:
 
   if (session.step === "salary") {
     session.data.salary = requireText(value, "Maosh");
+    session.step = "salaryMin";
+    await ctx.reply("Minimal maoshni kiriting (so'mda) yoki 'O'tkazib yuborish'ni bosing:",
+      Markup.keyboard([["O'tkazib yuborish"], ["Qaytish"]]).resize()
+    );
+    return;
+  }
+
+  if (session.step === "salaryMin") {
+    if (value !== "O'tkazib yuborish") {
+      const salaryMin = parseInt(value, 10);
+      if (isNaN(salaryMin) || salaryMin < 0) {
+        await ctx.reply("Iltimos, to'g'ri raqam kiriting:");
+        return;
+      }
+      session.data.salaryMin = salaryMin;
+    }
+    session.step = "salaryMax";
+    await ctx.reply("Maksimal maoshni kiriting (so'mda) yoki 'O'tkazib yuborish'ni bosing:",
+      Markup.keyboard([["O'tkazib yuborish"], ["Qaytish"]]).resize()
+    );
+    return;
+  }
+
+  if (session.step === "salaryMax") {
+    if (value !== "O'tkazib yuborish") {
+      const salaryMax = parseInt(value, 10);
+      if (isNaN(salaryMax) || salaryMax < 0) {
+        await ctx.reply("Iltimos, to'g'ri raqam kiriting:");
+        return;
+      }
+      session.data.salaryMax = salaryMax;
+    }
     session.step = "location";
     await ctx.reply("Ish joyini yozing. Masalan: Toshkent, Chilonzor", backMenu);
     return;
@@ -85,6 +120,42 @@ export async function handleJobFlow(ctx: Context, session: JobSession, telegram:
     }
 
     session.data.difficulty = value === "Yengil ish" ? "light" : "heavy";
+    session.step = "jobType";
+    await ctx.reply("Ish muddatini tanlang:", jobTypeKeyboard);
+    return;
+  }
+
+  if (session.step === "jobType") {
+    if (value === "Vaqtinchalik") {
+      session.data.jobType = "temporary";
+    } else if (value === "Doimiy") {
+      session.data.jobType = "permanent";
+    } else if (value === "Qaytish") {
+      clearSession(ctx);
+      return;
+    } else {
+      await ctx.reply("Iltimos, variantni tanlang:", jobTypeKeyboard);
+      return;
+    }
+    session.step = "experienceLevel";
+    await ctx.reply("Tajriba darajasini tanlang:", experienceLevelKeyboard);
+    return;
+  }
+
+  if (session.step === "experienceLevel") {
+    if (value === "Boshlang'ich") {
+      session.data.experienceLevel = "beginner";
+    } else if (value === "O'rta") {
+      session.data.experienceLevel = "intermediate";
+    } else if (value === "Ekspert") {
+      session.data.experienceLevel = "expert";
+    } else if (value === "Qaytish") {
+      clearSession(ctx);
+      return;
+    } else {
+      await ctx.reply("Iltimos, variantni tanlang:", experienceLevelKeyboard);
+      return;
+    }
     session.step = "photo";
     await ctx.reply("Ish uchun rasm yuboring yoki o'tkazib yuboring:", skipPhotoKeyboard);
     return;
@@ -101,11 +172,15 @@ export async function handleJobFlow(ctx: Context, session: JobSession, telegram:
     title: requireText(session.data.title, "Ish nomi"),
     description: requireText(session.data.description, "Tavsif"),
     salary: requireText(session.data.salary, "Maosh"),
+    salaryMin: session.data.salaryMin ?? null,
+    salaryMax: session.data.salaryMax ?? null,
     location: requireText(session.data.location, "Joy"),
     geoLocation: session.data.geoLocation ?? null,
     workTime: session.data.workTime ?? null,
     meals: session.data.meals ?? null,
     difficulty: session.data.difficulty ?? "light",
+    jobType: session.data.jobType ?? "temporary",
+    experienceLevel: session.data.experienceLevel ?? "beginner",
     photoFileId
   };
 

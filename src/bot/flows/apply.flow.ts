@@ -43,7 +43,9 @@ export async function handleApplyFlow(ctx: Context, jobId: string, telegram: Tel
   const application = await applyToJob({
     jobId,
     userId: worker.id,
-    message: message === "-" ? null : message || null
+    message: message === "-" ? null : message || null,
+    status: "pending",
+    completedAt: null
   }, telegram);
 
   clearSession(ctx);

@@ -2,10 +2,10 @@ import type { Context, Telegram } from "telegraf";
 import { upsertUser } from "../../database/jsonDb.js";
 import { notifyAdminsAboutProfileUpdate, notifyAdminsAboutRegistration } from "../../services/notification.service.js";
 import type { NewUser, RegisterSession, User, UserRole } from "../../types.js";
-import { parseAge, requireText } from "../../utils/validation.js";
+import { parseAge, parseCardNumber, requireText } from "../../utils/validation.js";
 import { consentText } from "../consent.js";
 import { getPhone, getPhotoFileId, getText, getUserId } from "../context.js";
-import { backMenu, consentKeyboard, menuFor, phoneKeyboard, startMenu } from "../keyboards.js";
+import { backMenu, consentKeyboard, languageKeyboard, menuFor, phoneKeyboard, startMenu } from "../keyboards.js";
 import { clearSession, setSession } from "../sessionStore.js";
 
 export function startRegisterFlow(ctx: Context, role: UserRole): void {
@@ -17,7 +17,10 @@ export function startRegisterFlow(ctx: Context, role: UserRole): void {
     data: {
       telegramId: getUserId(ctx),
       role,
-      username: ctx.from?.username || null
+      username: ctx.from?.username || null,
+      language: "uz",
+      rating: 0,
+      ratingCount: 0
     }
   });
 }
@@ -103,11 +106,38 @@ export async function handleRegisterFlow(ctx: Context, session: RegisterSession,
     return;
   }
 
-  if (!getPhone(ctx) || !("contact" in (ctx.message || {}))) {
-    await ctx.reply("Telefon raqamni pastdagi tugma orqali yuboring.", phoneKeyboard);
+  if (session.step === "phone") {
+    if (!getPhone(ctx) || !("contact" in (ctx.message || {}))) {
+      await ctx.reply("Telefon raqamni pastdagi tugma orqali yuboring.", phoneKeyboard);
+      return;
+    }
+
+    session.data.phone = requireText(getPhone(ctx), "Telefon");
+
+    if (session.role === "worker" && session.mode === "create") {
+      session.step = "card";
+      await ctx.reply("Karta raqamingizni kiriting (16 ta raqam). Maosh shu kartaga o'tkaziladi:", backMenu);
+      return;
+    }
+
+    await finishRegistration(ctx, session, telegram);
     return;
   }
 
+  if (session.step === "card") {
+    const cardNumber = parseCardNumber(getText(ctx));
+
+    if (!cardNumber) {
+      await ctx.reply("Karta raqamini 16 ta raqam bilan kiriting. Masalan: 8600123456789012", backMenu);
+      return;
+    }
+
+    session.data.cardNumber = cardNumber;
+    await finishRegistration(ctx, session, telegram);
+  }
+}
+
+async function finishRegistration(ctx: Context, session: RegisterSession, telegram: Telegram): Promise<void> {
   const userData: NewUser = {
     telegramId: getUserId(ctx),
     username: ctx.from?.username || null,
@@ -117,8 +147,15 @@ export async function handleRegisterFlow(ctx: Context, session: RegisterSession,
     photoFileId: requireText(session.data.photoFileId || undefined, "Rasm"),
     consentAccepted: session.data.consentAccepted ?? true,
     consentAcceptedAt: session.data.consentAcceptedAt || null,
-    phone: requireText(getPhone(ctx), "Telefon"),
-    role: session.role
+    phone: requireText(session.data.phone || getPhone(ctx), "Telefon"),
+    cardNumber: session.data.cardNumber ?? null,
+    banned: false,
+    bannedAt: null,
+    banReason: null,
+    role: session.role,
+    language: session.data.language ?? "uz",
+    rating: session.data.rating ?? 0,
+    ratingCount: session.data.ratingCount ?? 0
   };
   const user = await upsertUser(userData);
 

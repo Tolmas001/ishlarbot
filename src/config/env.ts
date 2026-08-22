@@ -8,7 +8,8 @@ export const env = {
   botUsername: process.env.BOT_USERNAME || "botname",
   adminIds: parseList(process.env.ADMIN_IDS),
   minAge: Number(process.env.MIN_AGE || 16),
-  maxAge: Number(process.env.MAX_AGE || 100)
+  maxAge: Number(process.env.MAX_AGE || 100),
+  commissionPercent: Number(process.env.COMMISSION_PERCENT || 10)
 };
 
 function requireEnv(name: string): string {

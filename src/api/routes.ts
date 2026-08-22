@@ -29,11 +29,15 @@ export function createApiRouter(telegram: Telegram): Router {
       title: requireText(req.body.title, "title"),
       description: requireText(req.body.description, "description"),
       salary: requireText(req.body.salary, "salary"),
+      salaryMin: req.body.salaryMin || null,
+      salaryMax: req.body.salaryMax || null,
       location: requireText(req.body.location, "location"),
       geoLocation: req.body.geoLocation || null,
       workTime: req.body.workTime || null,
       meals: req.body.meals || null,
       difficulty: req.body.difficulty === "heavy" ? "heavy" : "light",
+      jobType: req.body.jobType || "temporary",
+      experienceLevel: req.body.experienceLevel || "beginner",
       photoFileId: req.body.photoFileId || null
     }, telegram);
 
@@ -53,7 +57,9 @@ export function createApiRouter(telegram: Telegram): Router {
     const application = await applyToJob({
       jobId,
       userId,
-      message: req.body.message || null
+      message: req.body.message || null,
+      status: "pending",
+      completedAt: null
     }, telegram);
 
     if (!application) {

@@ -1,8 +1,22 @@
 import type { Context } from "telegraf";
 import { Markup } from "telegraf";
 import { env } from "../../config/env.js";
-import { approveJob, closeJob, deleteJob, rejectJob, readDb, saveJobChannelMessage } from "../../database/jsonDb.js";
-import { formatJob, formatUserProfile } from "../formatters.js";
+import {
+  approveJob,
+  approvePayment,
+  banUser,
+  closeJob,
+  deleteJob,
+  findJob,
+  findPayment,
+  findUserById,
+  listPendingPayments,
+  readDb,
+  rejectJob,
+  rejectPayment,
+  saveJobChannelMessage
+} from "../../database/jsonDb.js";
+import { formatJob, formatPayment, formatUserProfile } from "../formatters.js";
 import { adminMenu } from "../keyboards.js";
 import { getUserId } from "../context.js";
 import { publishJobToChannel, updateChannelJobPost } from "../../services/notification.service.js";
@@ -38,7 +52,9 @@ export async function sendStats(ctx: Context): Promise<void> {
     `Ochiq e'lonlar: ${openJobs}`,
     `Yopilgan e'lonlar: ${closedJobs}`,
     `Rad etilganlar: ${rejectedJobs}`,
-    `Arizalar: ${db.applications.length}`
+    `Arizalar: ${db.applications.length}`,
+    `To'lovlar: ${db.payments.length}`,
+    `Tekshiruvdagi cheklar: ${db.payments.filter((payment) => payment.status === "pending_review").length}`
   ].join("\n"), adminMenu);
 }
 
@@ -154,4 +170,107 @@ export async function rejectJobAsAdmin(ctx: Context, jobId: string): Promise<voi
 
   const job = await rejectJob(jobId);
   await ctx.answerCbQuery(job ? "E'lon rad etildi" : "E'lon topilmadi");
+}
+
+export async function sendPendingPayments(ctx: Context): Promise<void> {
+  if (!isAdmin(ctx)) return;
+
+  const payments = await listPendingPayments();
+
+  if (!payments.length) {
+    await ctx.reply("Tekshiruvdagi to'lov cheklari yo'q.", adminMenu);
+    return;
+  }
+
+  for (const payment of payments) {
+    const job = await findJob(payment.jobId);
+    const worker = await findUserById(payment.workerId);
+    const caption = formatPayment(payment, job?.title || "Noma'lum ish", worker?.name || "Noma'lum ishchi");
+
+    if (payment.receiptFileId) {
+      await ctx.replyWithPhoto(payment.receiptFileId, {
+        caption,
+        ...Markup.inlineKeyboard([
+          [
+            Markup.button.callback("Chek to'g'ri", `payment_approve:${payment.id}`),
+            Markup.button.callback("Soxta chek - ban", `payment_reject:${payment.id}`)
+          ]
+        ])
+      });
+      continue;
+    }
+
+    await ctx.reply(caption, Markup.inlineKeyboard([
+      [
+        Markup.button.callback("Chek to'g'ri", `payment_approve:${payment.id}`),
+        Markup.button.callback("Soxta chek - ban", `payment_reject:${payment.id}`)
+      ]
+    ]));
+  }
+}
+
+export async function approvePaymentAsAdmin(ctx: Context, paymentId: string): Promise<void> {
+  if (!isAdmin(ctx)) {
+    await ctx.answerCbQuery();
+    return;
+  }
+
+  const payment = await approvePayment(paymentId, getUserId(ctx));
+
+  if (!payment) {
+    await ctx.answerCbQuery("To'lov topilmadi");
+    return;
+  }
+
+  const job = await findJob(payment.jobId);
+  const worker = await findUserById(payment.workerId);
+
+  await ctx.telegram.sendMessage(
+    payment.employerTelegramId,
+    `To'lov chekingiz tasdiqlandi.\n\n${formatPayment(payment, job?.title || "Ish", worker?.name || "Ishchi")}`
+  ).catch(() => undefined);
+
+  if (worker) {
+    await ctx.telegram.sendMessage(
+      worker.telegramId,
+      `Sizga to'lov tasdiqlandi.\n\nIsh: ${job?.title || "Ish"}\nSumma: ${payment.payoutAmount.toLocaleString("uz-UZ")} so'm`
+    ).catch(() => undefined);
+  }
+
+  await ctx.answerCbQuery("To'lov tasdiqlandi");
+}
+
+export async function rejectPaymentAsAdmin(ctx: Context, paymentId: string): Promise<void> {
+  if (!isAdmin(ctx)) {
+    await ctx.answerCbQuery();
+    return;
+  }
+
+  const payment = await findPayment(paymentId);
+
+  if (!payment || payment.status !== "pending_review") {
+    await ctx.answerCbQuery("To'lov topilmadi");
+    return;
+  }
+
+  const rejected = await rejectPayment(paymentId, getUserId(ctx));
+
+  if (!rejected) {
+    await ctx.answerCbQuery("To'lov topilmadi");
+    return;
+  }
+
+  const banReason = "Soxta to'lov cheki yuborgan";
+  await banUser(payment.employerTelegramId, banReason);
+
+  await ctx.telegram.sendMessage(
+    payment.employerTelegramId,
+    [
+      "Siz yuborgan to'lov cheki soxta deb topildi.",
+      "Hisobingiz botdan ban qilindi.",
+      `Sabab: ${banReason}`
+    ].join("\n")
+  ).catch(() => undefined);
+
+  await ctx.answerCbQuery("Soxta chek - foydalanuvchi ban qilindi");
 }
